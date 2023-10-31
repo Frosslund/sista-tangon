@@ -96,14 +96,13 @@ def fetch_coach_of_the_month_and_team_value(start_gw: int, end_gw: int) -> dict:
         
         for gameweek in res['current']:
             if gameweek['event'] in range(start_gw, end_gw+1):
-                total_points += gameweek['points']
-                
-                if gameweek['event'] == start_gw:
-                    start_value = gameweek['value'] / 10.0
-                if gameweek['event'] == end_gw:
-                    end_value = gameweek['value'] / 10.0
+                total_points += (gameweek['points'] - gameweek['event_transfers_cost'])
+            if gameweek['event'] == start_gw-1:
+                start_value = gameweek['value'] / 10.0
+            if gameweek['event'] == end_gw:
+                end_value = gameweek['value'] / 10.0
         
-        scores[manager['name']] = {'points': total_points, 'end_team_value': end_value, 'team_value_delta': end_value - start_value}
+        scores[manager['name']] = {'points': total_points, 'end_team_value': end_value, 'team_value_delta': round(end_value - start_value, 1)}
 
     """ with open('coach_of_the_month_and_team_value.json', 'w') as c:
         json.dump(scores, c) """
@@ -136,6 +135,7 @@ def fetch_captain_bench_transfer(start_gw_month: int, end_gw_month:int, end_gw_t
 
     for manager_id in tango_managers:
         manager = tango_managers[manager_id]
+        print(manager)
         scores[manager['team']] = {
             'points_on_bench_month': 0,
             'points_on_bench_total': 0,
@@ -158,10 +158,11 @@ def fetch_captain_bench_transfer(start_gw_month: int, end_gw_month:int, end_gw_t
             player_url = f'element-summary/{captain}'
             res_captain = requests.get(os.path.join(BASE_URL, player_url)).json()
             captain_history = res_captain['history']
-
-            for captain_fixture in captain_history:
+            
+            captain_fixtures = [d for d in captain_history if d['round'] == gw]
+            for captain_fixture in captain_fixtures:
                 scores[manager['team']]['captain_points_total'] += captain_fixture['total_points']
-                if captain_fixture['round'] in range(start_gw_month, end_gw_month+1):
+                if gw in range(start_gw_month, end_gw_month+1):
                     scores[manager['team']]['captain_points_month'] += captain_fixture['total_points']
 
             entry = res['entry_history']
@@ -230,6 +231,10 @@ def position_bench_goals_assists_xg_xa(
                 'total': 0,
                 'month': 0
             },
+            'bus': {
+                'total': 0,
+                'month': 0
+            },
             'forward': {
                 'total': 0,
                 'month': 0
@@ -253,6 +258,14 @@ def position_bench_goals_assists_xg_xa(
             'expected_assists': {
                 'total': 0.0,
                 'month': 0.0
+            },
+            'expected_goals_and_expected_assists': {
+                'total': 0.0,
+                'month': 0.0
+            },
+            '(goals+assist)-(xg+xa)': {
+                'total': 0.0,
+                'month': 0.0
             }
         }
         
@@ -272,32 +285,44 @@ def position_bench_goals_assists_xg_xa(
 
                 player_url = f"element-summary/{pick['element']}"
 
-                # list of games this season with detailed data. Assume sorted hence simple indexing,
-                # however if not sorted (will find out after gw2) then we can use 'round' key probably
                 player_history = requests.get(os.path.join(BASE_URL, player_url)).json()['history']
-                player_history_gw = player_history[gw-1]
+                gw_list = [d for d in player_history if d['round'] == gw]
                 
-                if multiplier == 0:
-                    scores[manager['team']]['bench']['total'] += player_history_gw['total_points']
-                    if gw in range(start_gw_month, end_gw_month+1):
-                        scores[manager['team']]['bench']['month'] += player_history_gw['total_points']
+                if len(gw_list) > 0:
+                    for player_history_gw in gw_list:
+                        if multiplier == 0:
+                            scores[manager['team']]['bench']['total'] += player_history_gw['total_points']
+                            if gw in range(start_gw_month, end_gw_month+1):
+                                scores[manager['team']]['bench']['month'] += player_history_gw['total_points']
 
-                    multiplier = 1 if bench_included else multiplier
+                            multiplier = 1 if bench_included else multiplier
 
-                scores[manager['team']][position]['total'] += player_history_gw['total_points'] * multiplier
-                if not multiplier == 0:
-                    scores[manager['team']]['goals']['total'] += player_history_gw['goals_scored']
-                    scores[manager['team']]['assists']['total'] += player_history_gw['assists']
-                    scores[manager['team']]['expected_goals']['total'] += float(player_history_gw['expected_goals'])
-                    scores[manager['team']]['expected_assists']['total'] += float(player_history_gw['expected_assists'])
-                if gw in range(start_gw_month, end_gw_month+1):
-                    scores[manager['team']][position]['month'] += player_history_gw['total_points'] * multiplier
+                        scores[manager['team']][position]['total'] += player_history_gw['total_points'] * multiplier
+                        if not multiplier == 0:
+                            scores[manager['team']]['goals']['total'] += player_history_gw['goals_scored']
+                            scores[manager['team']]['assists']['total'] += player_history_gw['assists']
+                            scores[manager['team']]['expected_goals']['total'] += float(player_history_gw['expected_goals'])
+                            scores[manager['team']]['expected_assists']['total'] += float(player_history_gw['expected_assists'])
+                        if gw in range(start_gw_month, end_gw_month+1):
+                            scores[manager['team']][position]['month'] += player_history_gw['total_points'] * multiplier
 
-                    if not multiplier == 0:
-                        scores[manager['team']]['goals']['month'] += player_history_gw['goals_scored']
-                        scores[manager['team']]['assists']['month'] += player_history_gw['assists']
-                        scores[manager['team']]['expected_goals']['month'] += float(player_history_gw['expected_goals'])
-                        scores[manager['team']]['expected_assists']['month'] += float(player_history_gw['expected_assists'])
+                            if not multiplier == 0:
+                                scores[manager['team']]['goals']['month'] += player_history_gw['goals_scored']
+                                scores[manager['team']]['assists']['month'] += player_history_gw['assists']
+                                scores[manager['team']]['expected_goals']['month'] += float(player_history_gw['expected_goals'])
+                                scores[manager['team']]['expected_assists']['month'] += float(player_history_gw['expected_assists'])
+                else:
+                    print(f"Blank gameweek for player: {player_collection[pick['element']]}")
+
+        # some more requested metrics.
+        for period in ['total', 'month']:
+            scores[manager['team']]['bus'][period] = scores[manager['team']]['goalkeeper'][period] + \
+                scores[manager['team']]['defender'][period]
+            scores[manager['team']]['expected_goals_and_expected_assists'][period] = scores[manager['team']]['expected_goals'][period] + \
+                scores[manager['team']]['expected_assists'][period]
+            scores[manager['team']]['(goals+assist)-(xg+xa)'][period] = \
+                (float(scores[manager['team']]['goals'][period] + scores[manager['team']]['assists'][period])) - \
+                    (scores[manager['team']]['expected_goals'][period] + scores[manager['team']]['expected_assists'][period])
         
         scores[manager['team']]['expected_goals']['total'] = round(scores[manager['team']]['expected_goals']['total'], 2) 
         scores[manager['team']]['expected_goals']['month'] = round(scores[manager['team']]['expected_goals']['month'], 2) 
@@ -345,23 +370,24 @@ def least_and_most_points(start_gw_month: int, end_gw_month: int) -> dict:
         }
         
         for gw in manager_history['current']:
+            print(gw)
             if gw['event'] == 1:
-                manager_scores['min_points_total'] = gw['total_points']
-                manager_scores['max_points_total'] = gw['total_points']
+                manager_scores['min_points_total'] = gw['points']
+                manager_scores['max_points_total'] = gw['points']
             if gw['event'] == start_gw_month:
-                manager_scores['min_points_month'] = gw['total_points']   
-                manager_scores['max_points_month'] = gw['total_points']   
+                manager_scores['min_points_month'] = gw['points']   
+                manager_scores['max_points_month'] = gw['points']   
             if gw['event'] > 1:
-                if gw['total_points'] < manager_scores['min_points_total']:
-                    manager_scores['min_points_total'] = gw['total_points']
-                if gw['total_points'] > manager_scores['max_points_total']:
-                    manager_scores['max_points_total'] = gw['total_points']
+                if gw['points'] < manager_scores['min_points_total']:
+                    manager_scores['min_points_total'] = gw['points']
+                if gw['points'] > manager_scores['max_points_total']:
+                    manager_scores['max_points_total'] = gw['points']
                 
                 if gw['event'] in range(start_gw_month, end_gw_month+1):
-                    if gw['total_points'] < manager_scores['min_points_month']:
-                        manager_scores['min_points_month'] = gw['total_points']
-                    if gw['total_points'] > manager_scores['max_points_month']:
-                        manager_scores['max_points_month'] = gw['total_points']
+                    if gw['points'] < manager_scores['min_points_month']:
+                        manager_scores['min_points_month'] = gw['points']
+                    if gw['points'] > manager_scores['max_points_month']:
+                        manager_scores['max_points_month'] = gw['points']
         
         scores[manager['team']] = manager_scores
 
@@ -376,9 +402,9 @@ if __name__ == '__main__':
     update_player_collection()
     fetch_manager_information()
     
-    gw_start_of_month = 1
-    gw_end_of_month = 1
-    gw_end_total = 1
+    gw_start_of_month = 8
+    gw_end_of_month = 10
+    gw_end_total = 10
     
     functions = {
         'coach_of_the_month_and_team_value': [
@@ -403,8 +429,8 @@ if __name__ == '__main__':
         function_setup = functions[func_key]
         func = function_setup[0]
         args = function_setup[1]
-        
+    
         stats = func(*args)
-        
+    
         with open(f"{func_key}.json", 'w') as f:
             json.dump(stats, f)
